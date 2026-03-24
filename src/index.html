@@ -219,7 +219,7 @@ canvas{display:block}
   <div style="width:100%;max-width:600px;margin:0 auto;display:flex;flex-direction:column;align-items:center;padding:40px 0">
     <div class="cs-title">LOBBY</div>
     <div id="lobbyCode" style="font-family:Cinzel,serif;font-size:28px;color:#ffd700;letter-spacing:6px;margin:16px 0;cursor:pointer" onclick="copyRoomCode()" title="Click to copy">CONNECTING...</div>
-    <div style="font-family:'Cormorant Garamond',serif;font-size:11px;color:#5a4a3a;margin-bottom:16px">Click code to copy · Share with your crew</div>
+    <div id="lobbyStatus" style="font-family:'Cormorant Garamond',serif;font-size:11px;color:#5a4a3a;margin-bottom:16px">Click code to copy · Share with your crew</div>
     <div id="lobbyMembers" style="width:100%;display:flex;flex-direction:column;gap:8px;margin-bottom:24px"></div>
     <div id="lobbyActions" style="display:flex;gap:12px"></div>
     <button class="end-btn" style="opacity:1;margin-top:20px;color:#886644" onclick="try{leaveRoom()}catch(e){};currentRoom=null;showS('charSel');buildCharSelect()">← Back to Menu</button>
@@ -5688,25 +5688,33 @@ requestAnimationFrame(loop);
 // ═══════════════════════════════════════
 async function hostRoom() {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(`${NGAMES}/rooms/create`, {
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({profile_id:activeProfile.id,game_id:'blacks-dungeon',mode:'coop',max_players:4})
+      body:JSON.stringify({profile_id:activeProfile.id,game_id:'blacks-dungeon',mode:'coop',max_players:4}),
+      signal: controller.signal
     }).then(r=>r.json());
+    clearTimeout(timeout);
     currentRoom = res.room;
     updateLobbyUI();
-  } catch(e) { console.warn('[Multi] Host failed:', e); }
+  } catch(e) { console.warn('[Multi] Host failed:', e); throw e; }
 }
 
 async function joinRoom(room_id) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(`${NGAMES}/rooms/join`, {
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({profile_id:activeProfile.id,room_id})
+      body:JSON.stringify({profile_id:activeProfile.id,room_id}),
+      signal: controller.signal
     }).then(r=>r.json());
+    clearTimeout(timeout);
     if(res.error){alert(res.error);return}
     currentRoom = res.room;
     updateLobbyUI();
-  } catch(e) { console.warn('[Multi] Join failed:', e); }
+  } catch(e) { console.warn('[Multi] Join failed:', e); throw e; }
 }
 
 async function leaveRoom() {
@@ -5744,10 +5752,24 @@ async function setReady(ready) {
 function doHostRoom(){
   if(!activeProfile){alert('Select a profile first');return}
   showS('lobbyScreen');
-  document.getElementById('lobbyCode').textContent='CONNECTING...';
+  const codeEl=document.getElementById('lobbyCode');
+  const actEl=document.getElementById('lobbyActions');
+  codeEl.textContent='CONNECTING...';codeEl.style.color='#ffd700';
+  actEl.innerHTML='';
   hostRoom().then(()=>{
-    if(!currentRoom){document.getElementById('lobbyCode').textContent='CONNECTION FAILED';document.getElementById('lobbyCode').style.color='#cc4444'}
-  }).catch(()=>{document.getElementById('lobbyCode').textContent='CONNECTION FAILED';document.getElementById('lobbyCode').style.color='#cc4444'});
+    if(!currentRoom){showLobbyError('Server returned no room — it may be down.',doHostRoom)}
+  }).catch((e)=>{
+    const msg=e.name==='AbortError'?'Connection timed out — server may be down.':'Could not reach N Games server.';
+    showLobbyError(msg,doHostRoom);
+  });
+}
+function showLobbyError(msg,retryFn){
+  const codeEl=document.getElementById('lobbyCode');
+  const actEl=document.getElementById('lobbyActions');
+  codeEl.textContent='CONNECTION FAILED';codeEl.style.color='#cc4444';
+  document.getElementById('lobbyStatus').textContent=msg;
+  actEl.innerHTML='<button onclick="('+retryFn.name+')()" style="font-family:Cinzel,serif;font-size:12px;color:#ffd700;background:none;border:1px solid #5a4a2a;padding:8px 24px;border-radius:4px;cursor:pointer;letter-spacing:3px">RETRY</button>'
+    +'<button onclick="showS(\'charSel\');buildCharSelect()" style="font-family:Cinzel,serif;font-size:12px;color:#8a7a5a;background:none;border:1px solid #3a2a18;padding:8px 24px;border-radius:4px;cursor:pointer;letter-spacing:3px">BACK</button>';
 }
 function promptJoinRoom(){document.getElementById('joinInput').style.display='block'}
 function doJoinRoom(){
@@ -5755,10 +5777,16 @@ function doJoinRoom(){
   if(!code){alert('Enter a room code');return}
   if(!activeProfile){alert('Select a profile first');return}
   showS('lobbyScreen');
-  document.getElementById('lobbyCode').textContent='JOINING...';
+  const codeEl=document.getElementById('lobbyCode');
+  const actEl=document.getElementById('lobbyActions');
+  codeEl.textContent='JOINING...';codeEl.style.color='#ffd700';
+  actEl.innerHTML='';
   joinRoom(code).then(()=>{
-    if(!currentRoom){document.getElementById('lobbyCode').textContent='ROOM NOT FOUND';document.getElementById('lobbyCode').style.color='#cc4444'}
-  }).catch(()=>{document.getElementById('lobbyCode').textContent='JOIN FAILED';document.getElementById('lobbyCode').style.color='#cc4444'});
+    if(!currentRoom){showLobbyError('Room not found — check the code or host may have left.',doJoinRoom)}
+  }).catch((e)=>{
+    const msg=e.name==='AbortError'?'Connection timed out — server may be down.':'Could not reach N Games server.';
+    showLobbyError(msg,doJoinRoom);
+  });
 }
 function copyRoomCode(){
   if(currentRoom)navigator.clipboard.writeText(currentRoom.id).then(()=>showBanner('Room code copied!','#44ff88')).catch(()=>{});
