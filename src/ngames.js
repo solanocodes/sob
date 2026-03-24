@@ -379,6 +379,70 @@
       });
     },
 
+    // ── Room / Multiplayer ──────────────────────────────────────────────────
+
+    /**
+     * Send real-time game state to other room members via WebSocket.
+     * @param {string} room_id
+     * @param {object} state — { x, y, hp, facing, ... }
+     */
+    sendRoomState(room_id, state) {
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.send(JSON.stringify({
+          type: 'room_state',
+          room_id,
+          profile_id: _config.profile_id,
+          state,
+        }));
+      }
+    },
+
+    /**
+     * Send a room event to other room members via WebSocket.
+     * @param {string} room_id
+     * @param {string} event — e.g. 'ability_used', 'ready_changed'
+     * @param {object} [data]
+     */
+    sendRoomEvent(room_id, event, data) {
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.send(JSON.stringify({
+          type: 'room_event',
+          room_id,
+          profile_id: _config.profile_id,
+          event,
+          ...(data || {}),
+        }));
+      }
+    },
+
+    /**
+     * Tell the server we're in a room (for WS routing).
+     * @param {string} room_id
+     */
+    joinRoomWS(room_id) {
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.send(JSON.stringify({
+          type: 'join_room',
+          room_id,
+          profile_id: _config.profile_id,
+        }));
+      }
+    },
+
+    /**
+     * Tell the server we left a room (for WS routing).
+     * @param {string} room_id
+     */
+    leaveRoomWS(room_id) {
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.send(JSON.stringify({
+          type: 'leave_room',
+          room_id,
+          profile_id: _config.profile_id,
+        }));
+      }
+    },
+
     // ── Event API ─────────────────────────────────────────────────────────────
     // Listen to real-time WebSocket events from the server.
     //
@@ -389,6 +453,14 @@
     //   'comment'       — { post_id, profile_id, comment_id }
     //   'message'       — { message }
     //   'session'       — { profile_id, game_id, score, session_id }
+    //   'player_state'  — { profile_id, state } (room game state)
+    //   'player_joined' — { room, profile_id }
+    //   'player_left'   — { room, profile_id }
+    //   'player_ready'  — { room }
+    //   'room_updated'  — { room }
+    //   'room_event'    — { event, ... }
+    //   'game_start'    — { room }
+    //   'room_closed'   — room was closed
     //   'ws_connected'  — WS came online
     //   'ws_disconnected' — WS dropped (auto-retrying)
     //   '*'             — all events

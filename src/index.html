@@ -5699,6 +5699,7 @@ async function hostRoom() {
     }).then(r=>r.json());
     clearTimeout(timeout);
     currentRoom = res.room;
+    try{NGame.joinRoomWS(currentRoom.id)}catch(e){}
     updateLobbyUI();
   } catch(e) { console.warn('[Multi] Host failed:', e); throw e; }
 }
@@ -5715,6 +5716,7 @@ async function joinRoom(room_id) {
     clearTimeout(timeout);
     if(res.error){alert(res.error);return}
     currentRoom = res.room;
+    try{NGame.joinRoomWS(currentRoom.id)}catch(e){}
     updateLobbyUI();
   } catch(e) { console.warn('[Multi] Join failed:', e); throw e; }
 }
@@ -5727,6 +5729,7 @@ async function leaveRoom() {
       body:JSON.stringify({profile_id:activeProfile.id,room_id:currentRoom.id})
     });
   } catch(e) {}
+  try{if(currentRoom)NGame.leaveRoomWS(currentRoom.id)}catch(e){}
   stopLobbyPoll();currentRoom=null;otherPlayers={};
 }
 
@@ -5748,6 +5751,8 @@ async function setReady(ready) {
       body:JSON.stringify({profile_id:activeProfile.id,room_id:currentRoom.id,ready})
     }).then(r=>r.json());
     if(res.room){currentRoom=res.room;updateLobbyUI()}
+    // Broadcast ready change via WS so other players see it immediately
+    try{NGame.sendRoomEvent(currentRoom.id,'ready_changed',{room:currentRoom})}catch(e){}
   } catch(e) {}
 }
 
@@ -5832,6 +5837,11 @@ try {
     if(msg.room){currentRoom=msg.room;updateLobbyUI()}
   });
 
+  NGame.on('ws_connected', () => {
+    // Re-join room on WS after reconnect
+    if(currentRoom)try{NGame.joinRoomWS(currentRoom.id)}catch(e){}
+  });
+
   NGame.on('room_event', (msg) => {
     // Ready state changes broadcast as room_event
     if(msg.event==='ready_changed'&&msg.room){currentRoom=msg.room;updateLobbyUI()}
@@ -5850,8 +5860,13 @@ function startLobbyPoll(){
   _lobbyPoll=setInterval(async()=>{
     if(!currentRoom||!document.getElementById('lobbyScreen').classList.contains('active')){stopLobbyPoll();return}
     try{
-      const res=await fetch(`${NGAMES}/rooms/${currentRoom.id}`,{headers:{'Content-Type':'application/json'}}).then(r=>r.json());
-      if(res.room){currentRoom=res.room;updateLobbyUI()}
+      // Try GET endpoint first
+      let res=await fetch(`${NGAMES}/rooms/${currentRoom.id}`,{headers:{'Content-Type':'application/json'}}).then(r=>r.json()).catch(()=>null);
+      // If GET failed or returned no room, try POST /rooms/status as fallback
+      if(!res||!res.room){
+        res=await fetch(`${NGAMES}/rooms/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room_id:currentRoom.id})}).then(r=>r.json()).catch(()=>null);
+      }
+      if(res&&res.room){currentRoom=res.room;updateLobbyUI()}
     }catch(e){}
   },2000);
 }
