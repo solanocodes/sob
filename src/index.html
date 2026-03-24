@@ -3295,6 +3295,34 @@ fireWeps=function(dt){
 // UPDATE
 // ═══════════════════════════════════════
 function update(dt){
+  // Spectate mode — follow teammates when dead in multiplayer
+  if(G.spectating&&!G.alive){
+    // Decay revive marker timer
+    if(G.reviveMarker){G.reviveMarker.timer-=dt;if(G.reviveMarker.timer<=0)G.reviveMarker=null}
+    // Follow first alive teammate's position
+    const alive=Object.values(otherPlayers).find(p=>p.alive);
+    if(alive){
+      G.camX+=(alive.x-G.camX)*Math.min(1,dt*5);
+      G.camY+=(alive.y-G.camY)*Math.min(1,dt*5);
+    }
+    // Still send state so others know we're dead
+    try{if(currentRoom?.status==='in_game')sendMultiState()}catch(e){}
+    // If all teammates dead too, truly end game
+    const anyAlive=Object.values(otherPlayers).some(p=>p.alive&&(Date.now()-(p._ts||0))<5000);
+    if(!anyAlive&&Object.keys(otherPlayers).length>0){
+      G.spectating=false;stopMusic();
+      try{saveToLeaderboard()}catch(e){}try{ngSubmitDeath()}catch(e){}try{if(currentRoom)leaveRoom()}catch(e){}
+      try{const gold=addRunGold();
+        document.getElementById('endT').textContent='CREW WIPED';document.getElementById('endT').style.background='linear-gradient(180deg,#cc3333,#661111)';
+        document.getElementById('endT').style['-webkit-background-clip']='text';document.getElementById('endT').style['-webkit-text-fill-color']='transparent';
+        document.getElementById('roomTrans').classList.remove('active');
+        document.getElementById('endSub').textContent='Your crew falls in the '+( FLOOR_NAMES[G.floorNum]||'depths')+'.';
+        document.getElementById('endStats').innerHTML=`${G.charAvatar} ${G.charName}<br>FLOOR: ${G.floorNum+1}<br>KILLS: ${G.kills}<br><span style="color:#ffd700">+${gold} GOLD</span>`;
+      }catch(e){}
+      setTimeout(()=>showS('endScreen'),800);
+    }
+    return;
+  }
   if(!G.alive||G.paused)return;
   if(G.transitioning){G.transTimer-=dt;if(G.transTimer<=0)finishTransition();return}
 
@@ -3990,8 +4018,10 @@ function update(dt){
         if(Math.hypot(e.x-h.x,e.y-h.y)<h.r)hitE(e,Math.ceil(h.dmg*dt*3));
       });
     }else{
-      // Enemy/environmental hazard — damage player
-      if(G.iFrames<=0&&Math.hypot(G.px-h.x,G.py-h.y)<h.r){
+      // Enemy/environmental hazard — damage player (0.5s grace period on spawn)
+      if(h._grace===undefined)h._grace=0.5;
+      if(h._grace>0){h._grace-=dt}
+      else if(G.iFrames<=0&&Math.hypot(G.px-h.x,G.py-h.y)<h.r){
         const dmg=Math.max(1,Math.floor(h.dmg*dt*3)-G.armor);
         if(dmg>0){G.hp-=dmg;if(h.type==='impact'){G.iFrames=0.2;G.shake=0.1}
           if(G.hp<=0){G.alive=false;endGame();return}}
@@ -4185,6 +4215,29 @@ function update(dt){
   G.camX+=(G.px-G.camX)*Math.min(1,dt*8);
   G.camY+=(G.py-G.camY)*Math.min(1,dt*8);
   updateHUD();
+
+  // Multiplayer: check for dead teammate revive markers nearby
+  if(currentRoom?.status==='in_game'){
+    Object.entries(otherPlayers).forEach(([pid,state])=>{
+      if(state.alive||!state.reviveMarker)return;
+      const rm=state.reviveMarker;
+      const dist=Math.hypot(G.px-rm.x,G.py-rm.y);
+      if(dist<50){
+        // Accumulate revive progress while standing near marker
+        rm._progress=(rm._progress||0)+dt;
+        const pct=Math.min(1,rm._progress/3); // 3 seconds to revive
+        G.floats.push({x:rm.x,y:rm.y-30,text:Math.floor(pct*100)+'%',col:'#44ff88',life:0.08,ml:0.08,sz:14});
+        if(pct>=1){
+          // Revive the teammate
+          try{NGame.sendRoomEvent(currentRoom.id,'revive_player',{target:pid})}catch(x){}
+          showBanner('⟐ TEAMMATE REVIVED ⟐','#44ff88');
+          snd('lvl');
+          delete state.reviveMarker;
+        }
+      }else{rm._progress=0}
+    });
+  }
+
   // Multiplayer state sync
   try{if(currentRoom?.status==='in_game')sendMultiState()}catch(e){}
 }
@@ -5514,6 +5567,15 @@ function render(){
     }
   }
 
+  // Spectate overlay when dead in multiplayer
+  if(G.spectating&&!G.alive){
+    c.fillStyle='rgba(0,0,0,0.3)';c.fillRect(0,0,W,H);
+    c.font='bold 16px Cinzel';c.textAlign='center';c.fillStyle='#cc4444';
+    c.fillText('☠ YOU HAVE FALLEN',W/2,40);
+    c.font='11px Cinzel';c.fillStyle='#aaa';
+    c.fillText('Spectating teammates — they can revive you',W/2,60);
+  }
+
   // Dungeon minimap
   drawMinimap();
 }
@@ -5678,10 +5740,20 @@ if(G.revives>0){
   for(let i=0;i<20;i++){const a=Math.random()*Math.PI*2;G.fx.push({type:'p',x:G.px,y:G.py,vx:Math.cos(a)*120,vy:Math.sin(a)*120,life:0.5,ml:0.5,sz:3,col:'#44ff88'})}
   return;
 }
-G.alive=false;G.shake=0;G.paused=false;G.transitioning=false;stopMusic();
+G.alive=false;G.shake=0;G.paused=false;G.transitioning=false;
+// Multiplayer: enter spectate mode instead of ending
+if(currentRoom&&currentRoom.status==='in_game'){
+  G.spectating=true;G.specTarget=null;
+  // Broadcast death so teammates can revive
+  try{NGame.sendRoomEvent(currentRoom.id,'player_died',{x:G.px,y:G.py})}catch(x){}
+  showBanner('YOU HAVE FALLEN — Spectating teammates','#cc4444');
+  // Drop a revive marker at death position
+  G.reviveMarker={x:G.px,y:G.py,timer:30,pid:activeProfile?.id};
+  return;
+}
+stopMusic();
 try{saveToLeaderboard()}catch(e){}
 try{ngSubmitDeath()}catch(e){}
-try{if(currentRoom)leaveRoom()}catch(e){}
 if(nightmareRun){nightmareRun=false;MUTATORS.forEach(m=>activeMutators[m.id]=false)}
 try{
   const gold=addRunGold();
@@ -5909,6 +5981,18 @@ try {
         showBanner(FLOOR_NAMES[G.floorNum]||'Unknown Depths','#c4956a');
       },600);
     }
+    // Teammate died — store their revive marker
+    if(msg.event==='player_died'&&msg.profile_id!==activeProfile?.id&&otherPlayers[msg.profile_id]){
+      otherPlayers[msg.profile_id].reviveMarker={x:msg.x,y:msg.y,_progress:0};
+      showBanner('⟐ TEAMMATE DOWN — Go revive them! ⟐','#cc4444');
+    }
+    // We got revived by a teammate
+    if(msg.event==='revive_player'&&msg.target===activeProfile?.id&&G&&!G.alive){
+      G.alive=true;G.spectating=false;G.hp=Math.floor(G.maxHp*0.3);G.iFrames=3;G.shake=0.3;
+      G.reviveMarker=null;
+      snd('lvl');showBanner('⟐ REVIVED BY TEAMMATE ⟐','#44ff88');
+      for(let i=0;i<20;i++){const a=Math.random()*Math.PI*2;G.fx.push({type:'p',x:G.px,y:G.py,vx:Math.cos(a)*120,vy:Math.sin(a)*120,life:0.5,ml:0.5,sz:3,col:'#44ff88'})}
+    }
     // Visual cues for other players' actions
     if(msg.event==='ability_used'&&otherPlayers[msg.profile_id]){
       const p=otherPlayers[msg.profile_id];
@@ -5948,6 +6032,8 @@ function sendMultiState() {
       facing:G.facing,char:G.charName,avatar:G.charAvatar,
       charIdx:selectedChar,walkFrame:G.walkFrame,
       projs:G.projs.slice(0,20).map(p=>({x:Math.round(p.x),y:Math.round(p.y),col:p.col,sz:p.sz})),
+      leveling:G.paused&&document.getElementById('lvlUp')?.classList.contains('active'),
+      reviveMarker:G.reviveMarker?{x:Math.round(G.reviveMarker.x),y:Math.round(G.reviveMarker.y)}:null,
       kills:G.kills,floor:G.floorNum,room:G.curRoom,alive:G.alive,
     });
   } catch(e) {}
@@ -5998,6 +6084,25 @@ function renderOtherPlayers(){
     c.fillStyle='#111';c.fillRect(sx-bw/2,sy-16,bw,3);
     c.fillStyle=hpPct>0.5?'#44cc44':hpPct>0.25?'#cccc44':'#cc4444';
     c.fillRect(sx-bw/2,sy-16,bw*hpPct,3);
+    // Level-up indicator
+    if(state.leveling){
+      c.font='bold 10px Cinzel';c.textAlign='center';c.fillStyle='#ffd700';
+      c.fillText('⟐ LEVELING UP ⟐',sx,sy-32);
+      // Pulsing glow around player
+      c.globalAlpha=0.15+0.1*Math.sin(Date.now()*0.005);
+      c.fillStyle='#ffd700';c.beginPath();c.arc(sx,sy,20,0,Math.PI*2);c.fill();
+    }
+    // Revive marker for dead teammates
+    if(!state.alive&&state.reviveMarker&&state.room===G.curRoom){
+      const rx=state.reviveMarker.x+ox,ry=state.reviveMarker.y+oy;
+      const pulse=0.5+0.3*Math.sin(Date.now()*0.004);
+      c.globalAlpha=pulse;c.strokeStyle='#44ff88';c.lineWidth=2;
+      c.beginPath();c.arc(rx,ry,25,0,Math.PI*2);c.stroke();
+      c.globalAlpha=0.15;c.fillStyle='#44ff88';c.beginPath();c.arc(rx,ry,25,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;c.font='14px serif';c.textAlign='center';c.textBaseline='middle';
+      c.fillStyle='#44ff88';c.fillText('✚',rx,ry);
+      c.font='9px Cinzel';c.fillText('REVIVE',rx,ry+20);
+    }
     // Render their projectiles
     if(state.projs&&state.room===G.curRoom){
       state.projs.forEach(p=>{
