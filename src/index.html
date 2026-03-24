@@ -5947,6 +5947,7 @@ function sendMultiState() {
       hp:Math.round(G.hp),maxHp:G.maxHp,
       facing:G.facing,char:G.charName,avatar:G.charAvatar,
       charIdx:selectedChar,walkFrame:G.walkFrame,
+      projs:G.projs.slice(0,20).map(p=>({x:Math.round(p.x),y:Math.round(p.y),col:p.col,sz:p.sz})),
       kills:G.kills,floor:G.floorNum,room:G.curRoom,alive:G.alive,
     });
   } catch(e) {}
@@ -5997,6 +5998,16 @@ function renderOtherPlayers(){
     c.fillStyle='#111';c.fillRect(sx-bw/2,sy-16,bw,3);
     c.fillStyle=hpPct>0.5?'#44cc44':hpPct>0.25?'#cccc44':'#cc4444';
     c.fillRect(sx-bw/2,sy-16,bw*hpPct,3);
+    // Render their projectiles
+    if(state.projs&&state.room===G.curRoom){
+      state.projs.forEach(p=>{
+        const px=p.x+ox,py=p.y+oy;
+        c.fillStyle=p.col||col;c.globalAlpha=0.35;c.beginPath();c.arc(px,py,(p.sz||4)+2,0,Math.PI*2);c.fill();
+        c.globalAlpha=0.9;c.beginPath();c.arc(px,py,p.sz||4,0,Math.PI*2);c.fill();
+        c.fillStyle='#fff';c.globalAlpha=0.5;c.beginPath();c.arc(px,py,(p.sz||4)*0.4,0,Math.PI*2);c.fill();
+      });
+    }
+    c.globalAlpha=1;
     c.restore();
   });
 }
