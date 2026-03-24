@@ -8,27 +8,42 @@ on:
 jobs:
   build-and-release:
     runs-on: windows-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     permissions:
       contents: write
-    
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Auto-bump patch version
+      - name: Get version
         run: |
           $pkg = Get-Content package.json | ConvertFrom-Json
-          $parts = $pkg.version.Split('.')
-          $parts[2] = [string]([int]$parts[2] + 1)
-          $newVer = $parts -join '.'
-          $pkg.version = $newVer
-          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
-          echo "VERSION=$newVer" >> $env:GITHUB_OUTPUT
-          echo "Auto-bumped to $newVer"
+          $ver = $pkg.version
+          # Check if this tag already exists
+          $tagExists = git tag -l "v$ver"
+          if ($tagExists) {
+            # Auto-bump patch to next available
+            $parts = $ver.Split('.')
+            $patch = [int]$parts[2]
+            do {
+              $patch++
+              $candidate = "$($parts[0]).$($parts[1]).$patch"
+              $exists = git tag -l "v$candidate"
+            } while ($exists)
+            $ver = $candidate
+            $pkg.version = $ver
+            $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+            echo "Auto-bumped to $ver (tag conflict)"
+          }
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          echo "Using version $ver"
         id: version
 
       - name: Install dependencies
@@ -44,9 +59,9 @@ jobs:
           name: Shape of Blacks v${{ steps.version.outputs.VERSION }}
           body: |
             ## Shape of Blacks v${{ steps.version.outputs.VERSION }}
-            
+
             Download **ShapeOfBlacks-portable.exe** below — no installation needed, just double-click to play.
-            
+
             Built from commit ${{ github.sha }}
           draft: false
           prerelease: false
