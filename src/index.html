@@ -3022,7 +3022,7 @@ function generateFloor(floorNum){
       const nRoom=combatRooms[Math.floor(gameRandom()*combatRooms.length)];
       const nem=NEMESIS;const nScale=(1.5+floorNum*0.4)*(1+(nem.kills||1)*0.3);
       const segs=nRoom.segments||[{x:0,y:0,w:nRoom.width,h:nRoom.height}];
-      const seg=segs[Math.floor(Math.random()*segs.length)];
+      const seg=segs[Math.floor(gameRandom()*segs.length)];
       const nx=seg.x+seg.w/2,ny=seg.y+seg.h/2;
       nRoom.enemies.push({x:nx,y:ny,
         hp:Math.floor(nem.hp*nScale*2),maxHp:Math.floor(nem.hp*nScale*2),
@@ -3759,13 +3759,15 @@ function update(dt){
   // ── CHAMPION SPAWN — random elite drops in mid-fight (15% chance per room, once) ──
   if(!room.cleared&&!room._championChecked&&(room.type==='combat'||room.type==='elite')&&room._roomTimer>8){
     room._championChecked=true;
-    if(Math.random()<0.15){
-      const aura=CHAMPION_AURAS[Math.floor(Math.random()*CHAMPION_AURAS.length)];
+    // In multiplayer, only host spawns champions and broadcasts to others
+    if(currentRoom&&currentRoom.host_id!==activeProfile?.id){/* skip — wait for host broadcast */}
+    else if(gameRandom()<0.15){
+      const aura=CHAMPION_AURAS[Math.floor(gameRandom()*CHAMPION_AURAS.length)];
       const pool=getFloorEnemyPool(G.floorNum);
-      const base=pool[Math.floor(Math.random()*pool.length)];
+      const base=pool[Math.floor(gameRandom()*pool.length)];
       const scale=(1.3+G.floorNum*0.3)*(1+(G.loop||0)*0.4);
       const segs=room.segments||[{x:0,y:0,w:room.width,h:room.height}];
-      const seg=segs[Math.floor(Math.random()*segs.length)];
+      const seg=segs[Math.floor(gameRandom()*segs.length)];
       const cx=seg.x+seg.w/2,cy=seg.y+seg.h/2;
       const champ={x:cx,y:cy,
         hp:Math.floor(base.hp*scale*3),maxHp:Math.floor(base.hp*scale*3),
@@ -3778,25 +3780,30 @@ function update(dt){
       G.shake=0.5;snd('fire');snd('clear');
       showBanner('⚔ CHAMPION '+aura.name.toUpperCase()+' '+base.name.toUpperCase()+' ⚔',aura.col);
       G.fx.push({type:'n',x:cx,y:cy,life:0.8,ml:0.8,r:120,col:aura.col});
-      for(let i=0;i<15;i++){const a=Math.random()*Math.PI*2;
+      for(let i=0;i<15;i++){const a=gameRandom()*Math.PI*2;
         G.fx.push({type:'p',x:cx,y:cy,vx:Math.cos(a)*200,vy:Math.sin(a)*200,life:0.5,ml:0.5,sz:4,col:aura.col})}
+      // Broadcast champion spawn to other players
+      if(currentRoom)try{NGame.sendRoomEvent(currentRoom.id,'champion_spawn',{ri:G.curRoom,champ:{x:cx,y:cy,hp:champ.hp,maxHp:champ.maxHp,spd:champ.spd,dmg:champ.dmg,xp:champ.xp,col:champ.col,r:champ.r,name:champ.name,ai:champ.ai,aiData:champ.aiData,_champion:true,_aura:aura}})}catch(e){}
     }
   }
 
   // ── SHIELDED CONVOY — spawns once per floor, random combat room (20% chance) ──
   if(!room.cleared&&!room._convoyChecked&&room.type==='combat'&&room._roomTimer>5){
     room._convoyChecked=true;
-    if(Math.random()<0.2&&!G._convoySpawnedThisFloor){
+    // In multiplayer, only host spawns convoys
+    if(currentRoom&&currentRoom.host_id!==activeProfile?.id){/* skip — wait for host broadcast */}
+    else if(gameRandom()<0.2&&!G._convoySpawnedThisFloor){
       G._convoySpawnedThisFloor=true;
       const pool=getFloorEnemyPool(G.floorNum);const scale=(1.3+G.floorNum*0.3)*(1+(G.loop||0)*0.4);
       const segs=room.segments||[{x:0,y:0,w:room.width,h:room.height}];
-      const seg=segs[Math.floor(Math.random()*segs.length)];
+      const seg=segs[Math.floor(gameRandom()*segs.length)];
       const cx=seg.x+seg.w*0.3,cy=seg.y+seg.h/2;
       // Spawn 5 enemies in V formation with shared shield
       const shieldId='convoy_'+Date.now();
       showBanner('SHIELDED CONVOY INCOMING','#44aaff');G.shake=0.3;snd('fire');
+      const convoyData=[];
       for(let i=0;i<5;i++){
-        const base=pool[Math.floor(Math.random()*pool.length)];
+        const base=pool[Math.floor(gameRandom()*pool.length)];
         const ox=(i-2)*35,oy=Math.abs(i-2)*25;
         const ce={x:cx+ox,y:cy+oy,
           hp:Math.floor(base.hp*scale*1.5),maxHp:Math.floor(base.hp*scale*1.5),
@@ -3805,10 +3812,12 @@ function update(dt){
           name:'Convoy '+base.name,flash:0.3,dead:false,
           ai:base.ai,aiTimer:1,aiState:'chase',aiData:{...base},
           _convoyId:shieldId,_convoyShielded:true};
-        room.enemies.push(ce);
+        room.enemies.push(ce);convoyData.push({x:ce.x,y:ce.y,hp:ce.hp,maxHp:ce.maxHp,spd:ce.spd,dmg:ce.dmg,xp:ce.xp,r:ce.r,name:ce.name,ai:ce.ai,aiData:{...base}});
       }
       // Shared shield: all convoy members take 70% reduced damage while any 3+ alive
       G.fx.push({type:'n',x:cx,y:cy,life:0.6,ml:0.6,r:100,col:'#44aaff'});
+      // Broadcast convoy to other players
+      if(currentRoom)try{NGame.sendRoomEvent(currentRoom.id,'convoy_spawn',{ri:G.curRoom,convoy:convoyData,cx,cy,shieldId})}catch(e){}
     }
   }
 
@@ -3817,19 +3826,28 @@ function update(dt){
     const alive=room.enemies.filter(e=>!e.dead).length;
     const total=room.enemies.length;
     if(alive<=total*0.5&&total>0){
-      room._wave2Spawned=true;snd('fire');showBanner('REINFORCEMENTS INCOMING','#ff4444');G.shake=0.3;
-      const pool=getFloorEnemyPool(G.floorNum);
-      const loopMult=1+((G.loop||0)*0.4);const scale=(1.3+G.floorNum*0.3)*loopMult;
-      const waveCount=Math.floor(total*0.4); // 40% of original count
-      const segs=room.segments||[{x:0,y:0,w:room.width,h:room.height}];
-      for(let i=0;i<waveCount;i++){
-        const base=pool[Math.floor(Math.random()*pool.length)];
-        const seg=segs[Math.floor(Math.random()*segs.length)];
-        const sx=seg.x+40+Math.random()*(seg.w-80),sy=seg.y+40+Math.random()*(seg.h-80);
-        room.enemies.push({x:sx,y:sy,hp:Math.floor(base.hp*scale),maxHp:Math.floor(base.hp*scale),
-          spd:base.spd*(1+G.floorNum*0.15),dmg:Math.floor(base.dmg*scale),
-          xp:Math.ceil(base.xp*(1+G.floorNum*0.05)),col:base.col,r:base.r,
-          name:base.name,flash:0.3,dead:false,ai:base.ai,aiTimer:1,aiState:'chase',aiData:{...base}});
+      // In multiplayer, only host triggers waves and broadcasts
+      if(currentRoom&&currentRoom.host_id!==activeProfile?.id){/* skip — wait for host broadcast */}
+      else{
+        room._wave2Spawned=true;snd('fire');showBanner('REINFORCEMENTS INCOMING','#ff4444');G.shake=0.3;
+        const pool=getFloorEnemyPool(G.floorNum);
+        const loopMult=1+((G.loop||0)*0.4);const scale=(1.3+G.floorNum*0.3)*loopMult;
+        const waveCount=Math.floor(total*0.4); // 40% of original count
+        const segs=room.segments||[{x:0,y:0,w:room.width,h:room.height}];
+        const waveData=[];
+        for(let i=0;i<waveCount;i++){
+          const base=pool[Math.floor(gameRandom()*pool.length)];
+          const seg=segs[Math.floor(gameRandom()*segs.length)];
+          const sx=seg.x+40+gameRandom()*(seg.w-80),sy=seg.y+40+gameRandom()*(seg.h-80);
+          const en={x:sx,y:sy,hp:Math.floor(base.hp*scale),maxHp:Math.floor(base.hp*scale),
+            spd:base.spd*(1+G.floorNum*0.15),dmg:Math.floor(base.dmg*scale),
+            xp:Math.ceil(base.xp*(1+G.floorNum*0.05)),col:base.col,r:base.r,
+            name:base.name,flash:0.3,dead:false,ai:base.ai,aiTimer:1,aiState:'chase',aiData:{...base}};
+          room.enemies.push(en);
+          waveData.push({x:en.x,y:en.y,hp:en.hp,maxHp:en.maxHp,spd:en.spd,dmg:en.dmg,xp:en.xp,col:en.col,r:en.r,name:en.name,ai:en.ai,aiData:{...base}});
+        }
+        // Broadcast wave to other players
+        if(currentRoom)try{NGame.sendRoomEvent(currentRoom.id,'wave_spawn',{ri:G.curRoom,enemies:waveData})}catch(e){}
       }
     }
   }
@@ -3970,7 +3988,7 @@ function update(dt){
       // Mimic check — treasure room becomes a trap
       if(!room._mimicChecked){
         room._mimicChecked=true;
-        room._isMimic=Math.random()<0.15;
+        room._isMimic=gameRandom()<0.15;
       }
       if(room._isMimic&&!room._mimicTriggered){
         room._mimicTriggered=true;room.chest.opened=true;K['KeyF']=false;
@@ -3986,7 +4004,7 @@ function update(dt){
           aiData:{lungeCD:1.2,lungeDist:200,lungeSpd:500,lungeWind:0.3}});
         // Spawn 4 minions from the chest explosion
         for(let i=0;i<4;i++){const sa=Math.PI*2/4*i;
-          const base=pool[Math.floor(Math.random()*pool.length)];
+          const base=pool[Math.floor(gameRandom()*pool.length)];
           room.enemies.push({x:room.chest.x+Math.cos(sa)*50,y:room.chest.y+Math.sin(sa)*50,
             hp:Math.floor(base.hp*scale),maxHp:Math.floor(base.hp*scale),
             spd:base.spd*(1+G.floorNum*0.15),dmg:Math.floor(base.dmg*scale),
@@ -8172,6 +8190,42 @@ try {
     if(msg.event==='ability_used'&&otherPlayers[msg.profile_id]){
       const p=otherPlayers[msg.profile_id];
       if(G)G.fx.push({type:'n',x:p.x||0,y:p.y||0,life:0.3,ml:0.3,r:40,col:'#44ccee'});
+    }
+    // ── MULTIPLAYER SYNC: receive runtime enemy spawns from host ──
+    // Wave 2 spawn
+    if(msg.event==='wave_spawn'&&G&&msg.profile_id!==activeProfile?.id){
+      const room=G.floor.rooms[msg.ri];
+      if(room&&!room._wave2Spawned){
+        room._wave2Spawned=true;snd('fire');showBanner('REINFORCEMENTS INCOMING','#ff4444');G.shake=0.3;
+        (msg.enemies||[]).forEach(en=>{
+          room.enemies.push({...en,flash:0.3,dead:false,aiTimer:1,aiState:'chase',aiData:en.aiData||{}});
+        });
+      }
+    }
+    // Champion spawn
+    if(msg.event==='champion_spawn'&&G&&msg.profile_id!==activeProfile?.id){
+      const room=G.floor.rooms[msg.ri];
+      if(room&&msg.champ){
+        const ch=msg.champ;
+        room.enemies.push({...ch,flash:0.5,dead:false,aiTimer:0.5,aiState:'chase',aiData:ch.aiData||{},_champion:true,_aura:ch._aura});
+        room._championChecked=true;
+        G.shake=0.5;snd('fire');snd('clear');
+        showBanner('⚔ CHAMPION SPAWNED ⚔',ch._aura?.col||'#ff4444');
+        G.fx.push({type:'n',x:ch.x,y:ch.y,life:0.8,ml:0.8,r:120,col:ch._aura?.col||'#ff4444'});
+      }
+    }
+    // Convoy spawn
+    if(msg.event==='convoy_spawn'&&G&&msg.profile_id!==activeProfile?.id){
+      const room=G.floor.rooms[msg.ri];
+      if(room&&msg.convoy){
+        room._convoyChecked=true;G._convoySpawnedThisFloor=true;
+        showBanner('SHIELDED CONVOY INCOMING','#44aaff');G.shake=0.3;snd('fire');
+        const shieldId=msg.shieldId||('convoy_'+Date.now());
+        (msg.convoy||[]).forEach((en,i)=>{
+          room.enemies.push({...en,flash:0.3,dead:false,aiTimer:1,aiState:'chase',aiData:en.aiData||{},col:'#44aaff',_convoyId:shieldId,_convoyShielded:true});
+        });
+        G.fx.push({type:'n',x:msg.cx,y:msg.cy,life:0.6,ml:0.6,r:100,col:'#44aaff'});
+      }
     }
   });
 } catch(e) {}
