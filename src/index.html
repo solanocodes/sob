@@ -220,6 +220,8 @@ canvas{display:block}
     <div class="cs-title">LOBBY</div>
     <div id="lobbyCode" style="font-family:Cinzel,serif;font-size:28px;color:#ffd700;letter-spacing:6px;margin:16px 0;cursor:pointer" onclick="copyRoomCode()" title="Click to copy">CONNECTING...</div>
     <div id="lobbyStatus" style="font-family:'Cormorant Garamond',serif;font-size:11px;color:#5a4a3a;margin-bottom:16px">Click code to copy · Share with your crew</div>
+    <div style="font-family:Cinzel,serif;font-size:10px;color:#6a5a3a;letter-spacing:3px;margin-bottom:8px">CHOOSE YOUR GUNWARDEN</div>
+    <div id="lobbyCharPicker" style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;justify-content:center"></div>
     <div id="lobbyMembers" style="width:100%;display:flex;flex-direction:column;gap:8px;margin-bottom:24px"></div>
     <div id="lobbyActions" style="display:flex;gap:12px"></div>
     <button class="end-btn" style="opacity:1;margin-top:20px;color:#886644" onclick="try{leaveRoom()}catch(e){};currentRoom=null;showS('charSel');buildCharSelect()">← Back to Menu</button>
@@ -3503,6 +3505,50 @@ fireWeps=function(dt){
 // ═══════════════════════════════════════
 // UPDATE
 // ═══════════════════════════════════════
+// Spectate-mode update: runs enemy AI, projectile physics, FX, and hazards
+// so the spectating player can see the battle happening in real-time
+function _spectateUpdateEnemies(dt,room,enemies){
+  // Enemy AI movement — move enemies toward the nearest alive teammate's position
+  // Use the alive teammate we're spectating as the "player" position
+  const alive=Object.values(otherPlayers).find(p=>p.alive);
+  const tgtX=alive?alive.x:G.px, tgtY=alive?alive.y:G.py;
+  enemies.forEach(e=>{
+    e.flash=Math.max(0,e.flash-dt);
+    e.aiTimer=Math.max(0,(e.aiTimer||0)-dt);
+    const ang=Math.atan2(tgtY-e.y,tgtX-e.x);
+    const d=Math.hypot(tgtX-e.x,tgtY-e.y);
+    // Basic movement toward target
+    const spd=(e.spd||80);
+    if(d>30){e.x+=Math.cos(ang)*spd*dt;e.y+=Math.sin(ang)*spd*dt}
+    // Keep in room bounds
+    e.x=Math.max(e.r,Math.min(room.width-e.r,e.x));
+    e.y=Math.max(e.r,Math.min(room.height-e.r,e.y));
+  });
+  // Projectile physics
+  G.projs.forEach(p=>{
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    // Homing enemy projectiles
+    if(p.homing&&p.enemy&&alive){
+      const ha=Math.atan2(alive.y-p.y,alive.x-p.x);const spd=Math.hypot(p.vx,p.vy);
+      const ca=Math.atan2(p.vy,p.vx);let da=ha-ca;while(da>Math.PI)da-=Math.PI*2;while(da<-Math.PI)da+=Math.PI*2;
+      const na=ca+Math.max(-2.5*dt,Math.min(2.5*dt,da));p.vx=Math.cos(na)*spd;p.vy=Math.sin(na)*spd;
+    }
+    // Room bounds
+    if(p.x<-50||p.x>room.width+50||p.y<-50||p.y>room.height+50)p.life=0;
+    room.obstacles.forEach(ob=>{if(p.x>ob.x&&p.x<ob.x+ob.w&&p.y>ob.y&&p.y<ob.y+ob.h)p.life=0});
+  });
+  G.projs=G.projs.filter(p=>p.life>0);
+  // FX
+  G.fx.forEach(f=>{f.life-=dt;if(f.vx){f.x+=f.vx*dt;f.y+=f.vy*dt}});
+  G.fx=G.fx.filter(f=>f.life>0);
+  // Floats
+  G.floats.forEach(f=>{f.life-=dt;f.y-=30*dt});
+  G.floats=G.floats.filter(f=>f.life>0);
+  // Hazards
+  if(G.hazards)G.hazards.forEach(h=>{h.life-=dt});
+  if(G.hazards)G.hazards=G.hazards.filter(h=>h.life>0);
+}
+
 function update(dt){
   // Spectate mode — follow teammates when dead in multiplayer
   if(G.spectating&&!G.alive){
@@ -3530,15 +3576,26 @@ function update(dt){
       }catch(e){}
       setTimeout(()=>showS('endScreen'),800);
     }
-    return;
+    // DON'T return early — let enemy AI, projectiles, and hazards keep running
+    // so the spectator can see the full battle. Skip only player input/movement.
   }
-  if(!G.alive||G.paused)return;
+  if(G.paused)return;
+  // If dead and NOT spectating, stop updates. If spectating, continue for enemy AI.
+  if(!G.alive&&!G.spectating)return;
   if(G.transitioning){G.transTimer-=dt;if(G.transTimer<=0)finishTransition();return}
 
   G.shake=Math.max(0,G.shake-dt*4);
-  G.iFrames=Math.max(0,G.iFrames-dt);
   G.orbAngle+=dt*2.5;
   G.runTime+=dt;
+  // If spectating, skip all player-specific logic but let enemy AI + projectiles continue below
+  if(G.spectating&&!G.alive){
+    // Jump to enemy AI / projectile / hazard updates
+    const room=G.floor.rooms[G.curRoom];if(!room)return;
+    const enemies=room.enemies.filter(e=>!e.dead);
+    _spectateUpdateEnemies(dt,room,enemies);
+    return;
+  }
+  G.iFrames=Math.max(0,G.iFrames-dt);
   G.dashing=G.dashActive; // expose for blood_drain AI
   // Combo decay
   if(G.runStats&&G.runStats.comboTimer>0){G.runStats.comboTimer-=dt;if(G.runStats.comboTimer<=0)G.runStats.combo=0}
@@ -7956,7 +8013,7 @@ async function setReady(ready) {
 // UI triggers
 function doHostRoom(){
   if(!activeProfile){alert('Select a profile first');return}
-  showS('lobbyScreen');
+  showS('lobbyScreen');buildLobbyCharPicker();
   const codeEl=document.getElementById('lobbyCode');
   const actEl=document.getElementById('lobbyActions');
   codeEl.textContent='CONNECTING...';codeEl.style.color='#ffd700';
@@ -7982,7 +8039,7 @@ function doJoinRoom(){
   const code=document.getElementById('roomCodeInput').value.trim().toUpperCase();
   if(!code){alert('Enter a room code');return}
   if(!activeProfile){alert('Select a profile first');return}
-  showS('lobbyScreen');
+  showS('lobbyScreen');buildLobbyCharPicker();
   const codeEl=document.getElementById('lobbyCode');
   const actEl=document.getElementById('lobbyActions');
   codeEl.textContent='JOINING...';codeEl.style.color='#ffd700';
@@ -8200,16 +8257,46 @@ function renderOtherPlayers(){
       c.globalAlpha=0.15+0.1*Math.sin(Date.now()*0.005);
       c.fillStyle='#ffd700';c.beginPath();c.arc(sx,sy,20,0,Math.PI*2);c.fill();
     }
-    // Revive marker for dead teammates
+    // Revive marker for dead teammates — highly visible
     if(!state.alive&&state.reviveMarker&&state.room===G.curRoom){
       const rx=state.reviveMarker.x+ox,ry=state.reviveMarker.y+oy;
-      const pulse=0.5+0.3*Math.sin(Date.now()*0.004);
-      c.globalAlpha=pulse;c.strokeStyle='#44ff88';c.lineWidth=2;
-      c.beginPath();c.arc(rx,ry,25,0,Math.PI*2);c.stroke();
-      c.globalAlpha=0.15;c.fillStyle='#44ff88';c.beginPath();c.arc(rx,ry,25,0,Math.PI*2);c.fill();
-      c.globalAlpha=1;c.font='14px serif';c.textAlign='center';c.textBaseline='middle';
-      c.fillStyle='#44ff88';c.fillText('✚',rx,ry);
-      c.font='9px Cinzel';c.fillText('REVIVE',rx,ry+20);
+      const t=Date.now()*0.004;const pulse=0.6+0.4*Math.sin(t);
+      const dist=Math.hypot(G.px-state.reviveMarker.x,G.py-state.reviveMarker.y);
+      const pct=Math.min(1,(state.reviveMarker._progress||0)/3);
+      // Large pulsing outer ring
+      c.globalAlpha=pulse*0.25;c.fillStyle='#44ff88';c.beginPath();c.arc(rx,ry,40+Math.sin(t)*5,0,Math.PI*2);c.fill();
+      // Rotating dashes ring
+      c.strokeStyle='#44ff88';c.lineWidth=2.5;c.globalAlpha=0.7;
+      for(let i=0;i<8;i++){const a=t*0.5+Math.PI*2/8*i;
+        c.beginPath();c.arc(rx,ry,32,a,a+0.3);c.stroke()}
+      // Inner solid ring
+      c.globalAlpha=pulse*0.6;c.strokeStyle='#44ff88';c.lineWidth=3;
+      c.beginPath();c.arc(rx,ry,20,0,Math.PI*2);c.stroke();
+      // Progress ring (fills as you stand near)
+      if(pct>0){
+        c.strokeStyle='#fff';c.lineWidth=4;c.globalAlpha=0.9;
+        c.beginPath();c.arc(rx,ry,26,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);c.stroke();
+      }
+      // Cross icon
+      c.globalAlpha=1;c.fillStyle='#44ff88';c.font='bold 20px serif';c.textAlign='center';c.textBaseline='middle';
+      c.fillText('✚',rx,ry);
+      // Player name + REVIVE text
+      c.font='bold 10px Cinzel';c.fillStyle='#44ff88';
+      c.fillText('REVIVE '+((state.char||pid).toUpperCase()),rx,ry+32);
+      // Percentage when in range
+      if(dist<80&&pct>0){c.font='bold 14px Cinzel';c.fillStyle='#fff';c.fillText(Math.floor(pct*100)+'%',rx,ry-32)}
+      // Off-screen arrow indicator pointing toward marker
+      if(rx<10||rx>W-10||ry<10||ry>H-10){
+        const angToM=Math.atan2(ry-H/2,rx-W/2);
+        const edgeX=W/2+Math.cos(angToM)*Math.min(W/2-30,H/2-30);
+        const edgeY=H/2+Math.sin(angToM)*Math.min(W/2-30,H/2-30);
+        c.save();c.translate(edgeX,edgeY);c.rotate(angToM);
+        c.fillStyle='#44ff88';c.globalAlpha=pulse;
+        c.beginPath();c.moveTo(12,0);c.lineTo(-6,-8);c.lineTo(-6,8);c.closePath();c.fill();
+        c.font='8px Cinzel';c.rotate(-angToM);c.fillText('REVIVE',0,-12);
+        c.restore();
+      }
+      c.textBaseline='alphabetic';
     }
     // Render their projectiles
     if(state.projs&&state.room===G.curRoom){
@@ -8228,6 +8315,26 @@ function renderOtherPlayers(){
 // ═══════════════════════════════════════
 // MULTIPLAYER — Lobby UI
 // ═══════════════════════════════════════
+function buildLobbyCharPicker(){
+  const picker=document.getElementById('lobbyCharPicker');if(!picker)return;
+  picker.innerHTML='';
+  CHARS.forEach((ch,i)=>{
+    const locked=(i===2&&!META.upgrades.char3)||(i===3&&!META.upgrades.char4);
+    const btn=document.createElement('div');
+    const isSel=selectedChar===i;
+    btn.style.cssText=`display:flex;flex-direction:column;align-items:center;padding:8px 12px;border:2px solid ${isSel?'#ffd700':'#3a2a18'};border-radius:8px;cursor:${locked?'default':'pointer'};background:${isSel?'rgba(255,215,0,0.08)':'rgba(0,0,0,0.3)'};opacity:${locked?'0.35':'1'};transition:all 0.2s;min-width:80px`;
+    if(locked){
+      btn.innerHTML=`<div style="font-size:20px">🔒</div><div style="font-family:Cinzel,serif;font-size:9px;color:#5a4a3a;margin-top:4px">LOCKED</div>`;
+    }else{
+      const w=WEAPONS[ch.weapon];
+      btn.innerHTML=`<div style="font-size:22px">${ch.avatar}</div><div style="font-family:Cinzel,serif;font-size:10px;color:${isSel?'#ffd700':'#c4956a'};letter-spacing:1px;margin-top:2px">${ch.name}</div><div style="font-family:'Cormorant Garamond',serif;font-size:8px;color:#6a5a3a">${ch.cls}</div>`;
+      btn.onmouseenter=()=>{if(!isSel)btn.style.borderColor='#886600'};
+      btn.onmouseleave=()=>{if(!isSel)btn.style.borderColor='#3a2a18'};
+      btn.onclick=()=>{selectedChar=i;buildLobbyCharPicker()};
+    }
+    picker.appendChild(btn);
+  });
+}
 function updateLobbyUI(){
   if(!currentRoom)return;
   const CREW_COLORS={keshawn:'#80e060',sean:'#f0c040',dart:'#e04040',amari:'#40c0e0'};
