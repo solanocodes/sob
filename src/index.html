@@ -348,6 +348,13 @@ const NGAMES = 'https://ngames-server-production.up.railway.app';
 let currentRoom  = null;
 let otherPlayers = {};
 
+// Seeded PRNG (mulberry32) — used in multiplayer so all clients generate identical dungeons
+let _rngState=0;
+function seedRng(s){_rngState=s|0}
+function seededRandom(){_rngState|=0;_rngState=_rngState+0x6D2B79F5|0;let t=Math.imul(_rngState^_rngState>>>15,1|_rngState);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}
+// Use seeded RNG in multiplayer, Math.random in singleplayer
+function gameRandom(){return currentRoom?seededRandom():Math.random()}
+
 // ═══════════════════════════════════════
 // AUDIO
 // ═══════════════════════════════════════
@@ -2422,7 +2429,7 @@ function generateFloor(floorNum){
   const rooms=[];
   const COLS=7; // entrance + 5 mid columns + boss
   const rowCounts=[1];
-  for(let i=1;i<COLS-1;i++)rowCounts.push(2+Math.floor(Math.random()*2));
+  for(let i=1;i<COLS-1;i++)rowCounts.push(2+Math.floor(gameRandom()*2));
   rowCounts.push(1);
 
   let id=0;
@@ -2437,7 +2444,7 @@ function generateFloor(floorNum){
         if(col===2&&row===0&&floorNum>0)type='shop';
         else if(col===4&&row===0)type='treasure';
         else if(col===COLS-2&&row===0)type='elite';
-        else type=['combat','combat','combat','combat','elite'][Math.floor(Math.random()*5)];
+        else type=['combat','combat','combat','combat','elite'][Math.floor(gameRandom()*5)];
       }
       const room={
         id:id++,col,row,type,
@@ -2461,12 +2468,12 @@ function generateFloor(floorNum){
 
       // Base dimensions by type
       let bw,bh;
-      if(type==='boss'){bw=1600+Math.random()*300;bh=1100+Math.random()*200}
-      else if(type==='elite'){bw=1300+Math.random()*300;bh=950+Math.random()*200}
-      else if(type==='combat'){bw=1100+Math.random()*400;bh=800+Math.random()*300}
-      else if(type==='treasure'){bw=600+Math.random()*200;bh=500+Math.random()*150}
-      else if(type==='shop'){bw=800+Math.random()*200;bh=600+Math.random()*150}
-      else{bw=900+Math.random()*200;bh=700+Math.random()*150}
+      if(type==='boss'){bw=1600+gameRandom()*300;bh=1100+gameRandom()*200}
+      else if(type==='elite'){bw=1300+gameRandom()*300;bh=950+gameRandom()*200}
+      else if(type==='combat'){bw=1100+gameRandom()*400;bh=800+gameRandom()*300}
+      else if(type==='treasure'){bw=600+gameRandom()*200;bh=500+gameRandom()*150}
+      else if(type==='shop'){bw=800+gameRandom()*200;bh=600+gameRandom()*150}
+      else{bw=900+gameRandom()*200;bh=700+gameRandom()*150}
 
       if(shape==='rect'){
         room.segments.push({x:0,y:0,w:bw,h:bh});
@@ -2486,7 +2493,7 @@ function generateFloor(floorNum){
       }
       else if(shape==='L'){
         const ov=50;
-        const flip=Math.random()<0.5;
+        const flip=gameRandom()<0.5;
         // Horizontal bar + vertical bar with overlap at junction
         room.segments.push({x:0,y:0,w:bw,h:bh*0.45+ov}); // top extends down into junction
         if(flip)room.segments.push({x:0,y:bh*0.45-ov,w:bw*0.45,h:bh*0.55+ov}); // left column overlaps up
@@ -2494,7 +2501,7 @@ function generateFloor(floorNum){
       }
       else if(shape==='T'){
         const ov=50;
-        const orient=Math.floor(Math.random()*4);
+        const orient=Math.floor(gameRandom()*4);
         if(orient===0){// T pointing down
           room.segments.push({x:0,y:0,w:bw,h:bh*0.45+ov});
           room.segments.push({x:bw*0.25,y:bh*0.45-ov,w:bw*0.5,h:bh*0.55+ov});
@@ -2534,18 +2541,18 @@ function generateFloor(floorNum){
       // ── OBSTACLES ──
       const ow=room.width,oh=room.height;
       if(type==='combat'||type==='elite'||type==='boss'){
-        const numPillars=3+Math.floor(Math.random()*5)+(type==='boss'?3:0);
+        const numPillars=3+Math.floor(gameRandom()*5)+(type==='boss'?3:0);
         for(let o=0;o<numPillars;o++){
-          const sz=30+Math.random()*30;
-          const px=80+Math.random()*(ow-200),py=80+Math.random()*(oh-200);
+          const sz=30+gameRandom()*30;
+          const px=80+gameRandom()*(ow-200),py=80+gameRandom()*(oh-200);
           if(ptInRoom(room,px+sz/2,py+sz/2))room.obstacles.push({x:px,y:py,w:sz,h:sz,shape:'pillar'});
         }
-        const numWalls=1+Math.floor(Math.random()*3);
+        const numWalls=1+Math.floor(gameRandom()*3);
         for(let o=0;o<numWalls;o++){
-          const horiz=Math.random()<0.5;
-          const wx=120+Math.random()*(ow-300),wy=120+Math.random()*(oh-300);
-          const ww=horiz?120+Math.random()*180:25+Math.random()*15;
-          const wh=horiz?25+Math.random()*15:120+Math.random()*180;
+          const horiz=gameRandom()<0.5;
+          const wx=120+gameRandom()*(ow-300),wy=120+gameRandom()*(oh-300);
+          const ww=horiz?120+gameRandom()*180:25+gameRandom()*15;
+          const wh=horiz?25+gameRandom()*15:120+gameRandom()*180;
           if(ptInRoom(room,wx+ww/2,wy+wh/2))room.obstacles.push({x:wx,y:wy,w:ww,h:wh,shape:'wall'});
         }
         if(type==='boss'){
@@ -2655,7 +2662,7 @@ function generateFloor(floorNum){
           // Warning sign
           room.decor.push({type:'text',x:cx,y:cy-60,text:'DANGER: DEEP EXCAVATION',col:'#8a7a5a',size:8});
           // Rubble piles
-          for(let i=0;i<6;i++){room.decor.push({type:'rubble',x:100+Math.random()*(ow-200),y:100+Math.random()*(oh-200),col:'#5a5040'})}
+          for(let i=0;i<6;i++){room.decor.push({type:'rubble',x:100+gameRandom()*(ow-200),y:100+gameRandom()*(oh-200),col:'#5a5040'})}
           // Center bonfire
           room.decor.push({type:'fire',x:cx,y:cy,col:'#ff8822',r:20});
         }else if(floorNum===1){ // Crimson Depths — blood pools
@@ -2677,7 +2684,7 @@ function generateFloor(floorNum){
           for(let i=0;i<4;i++){room.decor.push({type:'lantern',x:cx-80+i*55,y:cy-65,col:'#cc3344'})}
         }else if(floorNum===2){ // Bone Warrens — ossuary
           // Bone piles
-          for(let i=0;i<8;i++){room.decor.push({type:'rubble',x:80+Math.random()*(ow-160),y:80+Math.random()*(oh-160),col:'#bbaa88'})}
+          for(let i=0;i<8;i++){room.decor.push({type:'rubble',x:80+gameRandom()*(ow-160),y:80+gameRandom()*(oh-160),col:'#bbaa88'})}
           // Skeleton displays on walls
           room.decor.push({type:'icon',x:80,y:cy-30,icon:'💀',size:18});
           room.decor.push({type:'icon',x:ow-100,y:cy-30,icon:'💀',size:18});
@@ -2738,7 +2745,7 @@ function generateFloor(floorNum){
           // The final warning
           room.decor.push({type:'text',x:cx,y:cy+120,text:'THE PYREHEART AWAITS',col:'#ff2288',size:10});
           // Star particles
-          for(let i=0;i<12;i++){room.decor.push({type:'star',x:60+Math.random()*(ow-120),y:60+Math.random()*(oh-120),col:'#8866ff'})}
+          for(let i=0;i<12;i++){room.decor.push({type:'star',x:60+gameRandom()*(ow-120),y:60+gameRandom()*(oh-120),col:'#8866ff'})}
         }
       }
 
@@ -2755,9 +2762,9 @@ function generateFloor(floorNum){
     cur.forEach(room=>{
       // Connect to 1-2 rooms in next column
       const targets=[];
-      targets.push(next[Math.floor(Math.random()*next.length)]);
-      if(next.length>1&&Math.random()<0.6){
-        let t2=next[Math.floor(Math.random()*next.length)];
+      targets.push(next[Math.floor(gameRandom()*next.length)]);
+      if(next.length>1&&gameRandom()<0.6){
+        let t2=next[Math.floor(gameRandom()*next.length)];
         if(t2!==targets[0])targets.push(t2);
       }
       targets.forEach(t=>{
@@ -2768,7 +2775,7 @@ function generateFloor(floorNum){
     // Ensure every room in next col has at least 1 connection from current
     next.forEach(nr=>{
       if(!cur.some(cr=>cr.connections.includes(nr.id))){
-        const src=cur[Math.floor(Math.random()*cur.length)];
+        const src=cur[Math.floor(gameRandom()*cur.length)];
         src.connections.push(nr.id);
         nr.connections.push(src.id);
       }
@@ -2805,12 +2812,12 @@ function generateFloor(floorNum){
     // Helper: find a valid spawn point inside room segments
     function spawnPt(margin){
       for(let tries=0;tries<50;tries++){
-        const ex=margin+Math.random()*(room.width-margin*2);
-        const ey=margin+Math.random()*(room.height-margin*2);
+        const ex=margin+gameRandom()*(room.width-margin*2);
+        const ey=margin+gameRandom()*(room.height-margin*2);
         if(ptInRoom(room,ex,ey)&&Math.hypot(ex-room.width/2,ey-room.height/2)>120)return{x:ex,y:ey};
       }
       // Fallback: pick center of a random segment
-      const s=room.segments[Math.floor(Math.random()*room.segments.length)];
+      const s=room.segments[Math.floor(gameRandom()*room.segments.length)];
       return{x:s.x+s.w/2,y:s.y+s.h/2};
     }
 
@@ -2819,15 +2826,15 @@ function generateFloor(floorNum){
       const pool=getFloorEnemyPool(floorNum);
       const loopMult=1+((G?G.loop:0)||0)*0.4;const scale=(1.3+floorNum*0.3)*loopMult;
       for(let i=0;i<count;i++){
-        const base=pool[Math.floor(Math.random()*pool.length)];
+        const base=pool[Math.floor(gameRandom()*pool.length)];
         const sp=spawnPt(60);
         room.enemies.push({
           x:sp.x,y:sp.y,
           hp:Math.floor(base.hp*scale),maxHp:Math.floor(base.hp*scale),
-          spd:base.spd*(0.9+Math.random()*0.2)*(1+(G?(G.loop||0):0)*0.1),dmg:Math.floor(base.dmg*scale),
+          spd:base.spd*(0.9+gameRandom()*0.2)*(1+(G?(G.loop||0):0)*0.1),dmg:Math.floor(base.dmg*scale),
           xp:Math.ceil(base.xp*(1+floorNum*0.05)),col:base.col,r:base.r,
           name:base.name,flash:0,dead:false,
-          ai:base.ai,aiTimer:Math.random()*2,aiState:'chase',
+          ai:base.ai,aiTimer:gameRandom()*2,aiState:'chase',
           aiData:{...base},
         });
       }
@@ -2838,7 +2845,7 @@ function generateFloor(floorNum){
       const minionCount=3+floorNum*2;
       const mPool=getFloorEnemyPool(floorNum);
       for(let i=0;i<minionCount;i++){
-        const base=mPool[Math.floor(Math.random()*mPool.length)];
+        const base=mPool[Math.floor(gameRandom()*mPool.length)];
         const sp=spawnPt(80);
         room.enemies.push({
           x:sp.x,y:sp.y,
@@ -2846,7 +2853,7 @@ function generateFloor(floorNum){
           spd:base.spd,dmg:Math.floor(base.dmg*scale),
           xp:Math.ceil(base.xp*1.5),col:base.col,r:base.r,
           name:base.name,flash:0,dead:false,
-          ai:base.ai,aiTimer:Math.random()*2,aiState:'chase',aiData:{...base},
+          ai:base.ai,aiTimer:gameRandom()*2,aiState:'chase',aiData:{...base},
         });
       }
       // The Boss
@@ -2878,12 +2885,12 @@ function generateFloor(floorNum){
         {name:'Random Weapon Lv3',icon:'🎁',desc:'Get a random weapon at level 3',cost:60,apply:()=>{
           const available=Object.keys(WEAPONS).filter(id=>!G.weapons.find(w=>w.id===id)&&id!=='death_ray'&&!Object.values(EVOLUTIONS).find(e=>e.evo===id));
           if(available.length>0&&G.weapons.length<(6+(META.upgrades.slots||0))){
-            const id=available[Math.floor(Math.random()*available.length)];
+            const id=available[Math.floor(gameRandom()*available.length)];
             G.weapons.push({id,lvl:3,cd:0});updateWepBar();snd('lvl');showBanner('Got '+WEAPONS[id].name+'!','#44ff88')}
           else{G.floats.push({x:G.px,y:G.py-20,text:'No room!',col:'#ff4444',life:1,ml:1,sz:12})}}},
         {name:'Random Passive Lv3',icon:'🌟',desc:'Get a random passive at level 3',cost:50,apply:()=>{
           const pks=Object.keys(PASSIVES).filter(k=>(G.passives[k]||0)<PASSIVES[k].maxLvl);
-          if(pks.length>0){const pk=pks[Math.floor(Math.random()*pks.length)];G.passives[pk]=Math.min(PASSIVES[pk].maxLvl,(G.passives[pk]||0)+3);
+          if(pks.length>0){const pk=pks[Math.floor(gameRandom()*pks.length)];G.passives[pk]=Math.min(PASSIVES[pk].maxLvl,(G.passives[pk]||0)+3);
             const p=PASSIVES[pk];if(p.eff==='dmgMult')G.dmgMult=1+G.passives[pk]*0.1;if(p.eff==='armor')G.armor=G.passives[pk];
             if(p.eff==='spdMult')G.spdMult=1+G.passives[pk]*0.08;if(p.eff==='regen')G.regen=G.passives[pk]*0.3;
             if(p.eff==='magnetMult')G.magnetMult=1+G.passives[pk]*0.25;snd('lvl');showBanner('Got '+p.name+' Lv3!','#44ff88')}}},
@@ -2894,7 +2901,7 @@ function generateFloor(floorNum){
         {name:'Purge Scroll',icon:'📜',desc:'Remove ALL curses',cost:50,apply:()=>{purgeAllCurses()}},
       ];
       // Pick 4 random items
-      const shuffled=[...shopPool].sort(()=>Math.random()-0.5);
+      const shuffled=[...shopPool].sort(()=>gameRandom()-0.5);
       const priceMult=1+((G?(G.loop||0):0))*0.5; // +50% per loop
       for(let i=0;i<4;i++){
         const item={...shuffled[i]};
@@ -2925,6 +2932,11 @@ function generateFloor(floorNum){
 // ═══════════════════════════════════════
 let G;
 function initGame(){
+  // Seed RNG from room ID so all players get identical dungeon
+  if(currentRoom&&currentRoom.id){
+    let h=0;for(let i=0;i<currentRoom.id.length;i++){h=Math.imul(31,h)+currentRoom.id.charCodeAt(i)|0}
+    seedRng(h);
+  }
   const ch=CHARS[selectedChar];
   const floor=generateFloor(0);
   G={
@@ -3457,6 +3469,7 @@ function update(dt){
           document.getElementById('roomTrans').classList.add('active');
           G.transitioning=true;G.transTimer=0.6;
           setTimeout(()=>{
+            if(currentRoom&&currentRoom.id){let h=0;for(let i=0;i<currentRoom.id.length;i++){h=Math.imul(31,h)+currentRoom.id.charCodeAt(i)|0};seedRng(h+G.floorNum*7919+(G.loop||0)*104729)}
             G.floor=generateFloor(G.floorNum);
             G.curRoom=G.floor.startRoom;
             const nr=G.floor.rooms[G.curRoom];
@@ -3482,6 +3495,7 @@ function update(dt){
         document.getElementById('roomTrans').classList.add('active');
         G.transitioning=true;G.transTimer=0.8;
         setTimeout(()=>{
+          if(currentRoom&&currentRoom.id){let h=0;for(let i=0;i<currentRoom.id.length;i++){h=Math.imul(31,h)+currentRoom.id.charCodeAt(i)|0};seedRng(h+(G.loop||0)*104729)}
           G.floor=generateFloor(0);
           G.curRoom=G.floor.startRoom;
           const nr=G.floor.rooms[G.curRoom];
@@ -5882,6 +5896,7 @@ function sendMultiState() {
       x:Math.round(G.px),y:Math.round(G.py),
       hp:Math.round(G.hp),maxHp:G.maxHp,
       facing:G.facing,char:G.charName,avatar:G.charAvatar,
+      charIdx:selectedChar,walkFrame:G.walkFrame,
       kills:G.kills,floor:G.floorNum,alive:G.alive,
     });
   } catch(e) {}
@@ -5901,17 +5916,34 @@ function renderOtherPlayers(){
     const sx=state.x+ox,sy=state.y+oy;
     const col=CREW_COLORS[pid]||'#ffffff';
     c.save();
-    // Colored ghost circle
-    c.globalAlpha=0.85;c.fillStyle=col+'33';c.strokeStyle=col;c.lineWidth=2;
-    c.beginPath();c.arc(sx,sy,12,0,Math.PI*2);c.fill();c.stroke();
-    // Avatar
-    c.globalAlpha=1;c.font='12px serif';c.textAlign='center';c.textBaseline='middle';
-    c.fillStyle='#fff';c.fillText(state.avatar||'?',sx,sy);
-    // Name tag
-    c.font='8px Cinzel';c.fillStyle=col;c.fillText(pid,sx,sy-20);
+    // Shadow
+    c.fillStyle='rgba(0,0,0,0.35)';c.beginPath();c.ellipse(sx,sy+14,13,4.5,0,0,Math.PI*2);c.fill();
+    // Character sprite (same rendering as main player)
+    const ci=state.charIdx!=null?state.charIdx:0;
+    const pFrame=Math.floor(state.walkFrame||0)%2;
+    const pSpr=SPR['plr'+ci+(pFrame?'b':'a')];
+    if(pSpr){
+      c.imageSmoothingEnabled=false;
+      const pScale=1.5;
+      const pw=pSpr.width*pScale,ph=pSpr.height*pScale;
+      c.globalAlpha=0.9;
+      if((state.facing||1)<0){c.translate(sx,sy-ph*0.4);c.scale(-1,1);c.drawImage(pSpr,-pw/2,0,pw,ph)}
+      else{c.drawImage(pSpr,sx-pw/2,sy-ph*0.4,pw,ph)}
+    } else {
+      // Fallback circle if sprite not loaded
+      c.globalAlpha=0.85;c.fillStyle=col+'33';c.strokeStyle=col;c.lineWidth=2;
+      c.beginPath();c.arc(sx,sy,12,0,Math.PI*2);c.fill();c.stroke();
+      c.globalAlpha=1;c.font='12px serif';c.textAlign='center';c.textBaseline='middle';
+      c.fillStyle='#fff';c.fillText(state.avatar||'?',sx,sy);
+    }
+    c.restore();
+    c.save();
+    // Name tag with crew color
+    c.font='9px Cinzel';c.textAlign='center';c.fillStyle=col;
+    c.fillText(state.char||pid,sx,sy-22);
     // Health bar
     const hpPct=Math.max(0,(state.hp||0)/(state.maxHp||1));
-    const bw=28;
+    const bw=30;
     c.fillStyle='#111';c.fillRect(sx-bw/2,sy-16,bw,3);
     c.fillStyle=hpPct>0.5?'#44cc44':hpPct>0.25?'#cccc44':'#cc4444';
     c.fillRect(sx-bw/2,sy-16,bw*hpPct,3);
