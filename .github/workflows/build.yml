@@ -19,17 +19,23 @@ jobs:
         with:
           node-version: 22
 
+      - name: Auto-bump patch version
+        run: |
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $parts = $pkg.version.Split('.')
+          $parts[2] = [string]([int]$parts[2] + 1)
+          $newVer = $parts -join '.'
+          $pkg.version = $newVer
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+          echo "VERSION=$newVer" >> $env:GITHUB_OUTPUT
+          echo "Auto-bumped to $newVer"
+        id: version
+
       - name: Install dependencies
         run: npm install
 
       - name: Build portable EXE
         run: npm run build
-
-      - name: Get version from package.json
-        id: version
-        run: |
-          $ver = (Get-Content package.json | ConvertFrom-Json).version
-          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
