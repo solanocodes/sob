@@ -7909,10 +7909,17 @@ setTimeout(()=>showS('endScreen'),800)}
 // ═══════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════
-function startGame(){showS('game');initGame();resize();updateHUD();updateWepBar();startMusic();
-try{_ngRunStart=Date.now();if(_ngPingTimer)clearInterval(_ngPingTimer);
-_ngPingTimer=setInterval(()=>{try{if(G&&G.alive&&!G.paused)ngPing()}catch(e){}},45000);ngPing();}catch(e){}
-showBanner(FLOOR_NAMES[0],'#c4956a')}
+function startGame(){
+  // Ensure room status is in_game for multiplayer sync
+  if(currentRoom){
+    currentRoom.status='in_game';
+    // Ensure WS room join — may have failed if WS wasn't connected earlier
+    try{NGame.joinRoomWS(currentRoom.id)}catch(e){}
+  }
+  showS('game');initGame();resize();updateHUD();updateWepBar();startMusic();
+  try{_ngRunStart=Date.now();if(_ngPingTimer)clearInterval(_ngPingTimer);
+  _ngPingTimer=setInterval(()=>{try{if(G&&G.alive&&!G.paused)ngPing()}catch(e){}},45000);ngPing();}catch(e){}
+  showBanner(FLOOR_NAMES[0],'#c4956a')}
 
 let lt=0;
 function loop(t){const dt=Math.min((t-lt)/1000,0.05);lt=t;
@@ -7984,20 +7991,20 @@ async function leaveRoom() {
   stopLobbyPoll();currentRoom=null;otherPlayers={};
 }
 
+let _multiStarting=false;
 async function startMultiGame() {
-  if(!currentRoom)return;
+  if(!currentRoom||_multiStarting)return;
+  _multiStarting=true;
+  // Save room ID before fetch in case currentRoom gets overwritten
+  const roomId=currentRoom.id;
   try {
-    const res = await fetch(`${NGAMES}/rooms/start`, {
+    await fetch(`${NGAMES}/rooms/start`, {
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({profile_id:activeProfile.id,room_id:currentRoom.id})
-    }).then(r=>r.json()).catch(()=>({}));
-    // Update room status immediately for the host
-    if(res.room) currentRoom = res.room;
-    else currentRoom.status = 'in_game';
-    stopLobbyPoll();
-    otherPlayers={};
-    startGame();
-  } catch(e) { console.warn('[Multi] Start failed:', e); }
+      body:JSON.stringify({profile_id:activeProfile.id,room_id:roomId})
+    }).catch(()=>{});
+    // Don't start here — let the game_start WS event handle it for BOTH host and joiner
+    // This prevents double-start race condition
+  } catch(e) { console.warn('[Multi] Start failed:', e); _multiStarting=false; }
 }
 
 async function setReady(ready) {
@@ -8080,9 +8087,13 @@ try {
   });
 
   NGame.on('game_start', (msg) => {
-    // Host already started via startMultiGame — skip double-start
+    // Prevent double-start
     if(G&&G.alive)return;
-    currentRoom=msg.room;stopLobbyPoll();otherPlayers={};startGame();
+    // Preserve currentRoom.id if msg.room is missing (some servers don't echo room)
+    if(msg.room) currentRoom=msg.room;
+    else if(currentRoom) currentRoom.status='in_game';
+    stopLobbyPoll();otherPlayers={};_multiStarting=false;
+    startGame();
   });
 
   NGame.on('room_closed', () => {
