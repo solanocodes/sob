@@ -731,6 +731,8 @@ addEventListener('contextmenu',e=>e.preventDefault()); // prevent right-click me
 addEventListener('keydown',e=>{
   // Skip if we're rebinding (handled by capture-phase listener)
   if(rebindAction)return;
+  // Don't intercept keys when typing in an input field
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   K[e.code]=true;
   // Prevent default on all bound keys + common game keys
   const boundCodes=Object.values(binds);
@@ -741,7 +743,7 @@ addEventListener('keydown',e=>{
     else if(document.getElementById('game').classList.contains('active'))togglePause();
   }
 });
-addEventListener('keyup',e=>{K[e.code]=false});
+addEventListener('keyup',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;K[e.code]=false});
 
 // Gamepad
 let gpOn=false,gp={lx:0,ly:0,a:false,b:false,start:false},gpP={a:false,b:false,start:false};
@@ -5725,7 +5727,7 @@ async function leaveRoom() {
       body:JSON.stringify({profile_id:activeProfile.id,room_id:currentRoom.id})
     });
   } catch(e) {}
-  currentRoom=null;otherPlayers={};
+  stopLobbyPoll();currentRoom=null;otherPlayers={};
 }
 
 async function startMultiGame() {
@@ -5741,10 +5743,11 @@ async function startMultiGame() {
 async function setReady(ready) {
   if(!currentRoom)return;
   try {
-    await fetch(`${NGAMES}/rooms/ready`, {
+    const res = await fetch(`${NGAMES}/rooms/ready`, {
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({profile_id:activeProfile.id,room_id:currentRoom.id,ready})
-    });
+    }).then(r=>r.json());
+    if(res.room){currentRoom=res.room;updateLobbyUI()}
   } catch(e) {}
 }
 
@@ -5758,6 +5761,7 @@ function doHostRoom(){
   actEl.innerHTML='';
   hostRoom().then(()=>{
     if(!currentRoom){showLobbyError('Server returned no room — it may be down.',doHostRoom)}
+    else{startLobbyPoll()}
   }).catch((e)=>{
     const msg=e.name==='AbortError'?'Connection timed out — server may be down.':'Could not reach N Games server.';
     showLobbyError(msg,doHostRoom);
@@ -5783,6 +5787,7 @@ function doJoinRoom(){
   actEl.innerHTML='';
   joinRoom(code).then(()=>{
     if(!currentRoom){showLobbyError('Room not found — check the code or host may have left.',doJoinRoom)}
+    else{startLobbyPoll()}
   }).catch((e)=>{
     const msg=e.name==='AbortError'?'Connection timed out — server may be down.':'Could not reach N Games server.';
     showLobbyError(msg,doJoinRoom);
@@ -5819,7 +5824,17 @@ try {
     showBanner('Room was closed','#ff4444');
   });
 
+  NGame.on('player_ready', (msg) => {
+    if(msg.room){currentRoom=msg.room;updateLobbyUI()}
+  });
+
+  NGame.on('room_updated', (msg) => {
+    if(msg.room){currentRoom=msg.room;updateLobbyUI()}
+  });
+
   NGame.on('room_event', (msg) => {
+    // Ready state changes broadcast as room_event
+    if(msg.event==='ready_changed'&&msg.room){currentRoom=msg.room;updateLobbyUI()}
     // Visual cues for other players' actions
     if(msg.event==='ability_used'&&otherPlayers[msg.profile_id]){
       const p=otherPlayers[msg.profile_id];
@@ -5827,6 +5842,20 @@ try {
     }
   });
 } catch(e) {}
+
+// Lobby polling fallback — poll room state every 2s while in lobby
+let _lobbyPoll=null;
+function startLobbyPoll(){
+  stopLobbyPoll();
+  _lobbyPoll=setInterval(async()=>{
+    if(!currentRoom||!document.getElementById('lobbyScreen').classList.contains('active')){stopLobbyPoll();return}
+    try{
+      const res=await fetch(`${NGAMES}/rooms/${currentRoom.id}`,{headers:{'Content-Type':'application/json'}}).then(r=>r.json());
+      if(res.room){currentRoom=res.room;updateLobbyUI()}
+    }catch(e){}
+  },2000);
+}
+function stopLobbyPoll(){if(_lobbyPoll){clearInterval(_lobbyPoll);_lobbyPoll=null}}
 
 // ═══════════════════════════════════════
 // MULTIPLAYER — State Sync (every frame via WS)
