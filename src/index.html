@@ -7939,6 +7939,9 @@ async function startMultiGame() {
 
 async function setReady(ready) {
   if(!currentRoom)return;
+  // Update local state immediately so UI is responsive
+  const me=(currentRoom.members||[]).find(m=>m.profile_id===activeProfile?.id);
+  if(me){me.ready=ready?1:0;updateLobbyUI()}
   try {
     const res = await fetch(`${NGAMES}/rooms/ready`, {
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -8104,13 +8107,22 @@ function startLobbyPoll(){
   _lobbyPoll=setInterval(async()=>{
     if(!currentRoom||!document.getElementById('lobbyScreen').classList.contains('active')){stopLobbyPoll();return}
     try{
-      // Try GET endpoint first
+      // Try GET endpoint first — returns room data flat (not nested under .room)
       let res=await fetch(`${NGAMES}/rooms/${currentRoom.id}`,{headers:{'Content-Type':'application/json'}}).then(r=>r.json()).catch(()=>null);
-      // If GET failed or returned no room, try POST /rooms/status as fallback
-      if(!res||!res.room){
+      // Normalize: server may return {room:{...}} or flat {id, members, ...}
+      let room = res?.room || (res?.id ? res : null);
+      // If GET failed, try POST /rooms/status as fallback
+      if(!room){
         res=await fetch(`${NGAMES}/rooms/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room_id:currentRoom.id})}).then(r=>r.json()).catch(()=>null);
+        room = res?.room || (res?.id ? res : null);
       }
-      if(res&&res.room){currentRoom=res.room;updateLobbyUI()}
+      if(room){
+        // Normalize members: server may return 'players' instead of 'members'
+        if(!room.members&&room.players){
+          room.members=room.players.map(p=>({...p,ready:p.ready?1:0}));
+        }
+        currentRoom=room;updateLobbyUI();
+      }
     }catch(e){}
   },2000);
 }
