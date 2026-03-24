@@ -7987,10 +7987,16 @@ async function leaveRoom() {
 async function startMultiGame() {
   if(!currentRoom)return;
   try {
-    await fetch(`${NGAMES}/rooms/start`, {
+    const res = await fetch(`${NGAMES}/rooms/start`, {
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({profile_id:activeProfile.id,room_id:currentRoom.id})
-    });
+    }).then(r=>r.json()).catch(()=>({}));
+    // Update room status immediately for the host
+    if(res.room) currentRoom = res.room;
+    else currentRoom.status = 'in_game';
+    stopLobbyPoll();
+    otherPlayers={};
+    startGame();
   } catch(e) { console.warn('[Multi] Start failed:', e); }
 }
 
@@ -8074,7 +8080,9 @@ try {
   });
 
   NGame.on('game_start', (msg) => {
-    currentRoom=msg.room;otherPlayers={};startGame();
+    // Host already started via startMultiGame — skip double-start
+    if(G&&G.alive)return;
+    currentRoom=msg.room;stopLobbyPoll();otherPlayers={};startGame();
   });
 
   NGame.on('room_closed', () => {
@@ -8163,6 +8171,8 @@ function startLobbyPoll(){
   stopLobbyPoll();
   _lobbyPoll=setInterval(async()=>{
     if(!currentRoom||!document.getElementById('lobbyScreen').classList.contains('active')){stopLobbyPoll();return}
+    // Never overwrite room if game already started
+    if(currentRoom.status==='in_game'){stopLobbyPoll();return}
     try{
       // Try GET endpoint first — returns room data flat (not nested under .room)
       let res=await fetch(`${NGAMES}/rooms/${currentRoom.id}`,{headers:{'Content-Type':'application/json'}}).then(r=>r.json()).catch(()=>null);
@@ -8174,6 +8184,8 @@ function startLobbyPoll(){
         room = res?.room || (res?.id ? res : null);
       }
       if(room){
+        // Never overwrite with in_game/started room data from poll
+        if(currentRoom.status==='in_game'){stopLobbyPoll();return}
         // Normalize members: server may return 'players' instead of 'members'
         if(!room.members&&room.players){
           room.members=room.players.map(p=>({...p,ready:p.ready?1:0}));
@@ -8213,10 +8225,11 @@ function renderOtherPlayers(){
   const now=Date.now();
   const ox=W/2-G.camX,oy=H/2-G.camY;
   Object.entries(otherPlayers).forEach(([pid,state])=>{
-    if(!state?.alive)return;
-    if(now-(state._ts||0)>3000)return;
+    if(now-(state._ts||0)>5000)return;
     const sx=state.x+ox,sy=state.y+oy;
     const col=CREW_COLORS[pid]||'#ffffff';
+    // Skip sprite rendering for dead players (but continue to revive marker below)
+    if(state?.alive){
     c.save();
     // Shadow
     c.fillStyle='rgba(0,0,0,0.35)';c.beginPath();c.ellipse(sx,sy+14,13,4.5,0,0,Math.PI*2);c.fill();
@@ -8257,6 +8270,8 @@ function renderOtherPlayers(){
       c.globalAlpha=0.15+0.1*Math.sin(Date.now()*0.005);
       c.fillStyle='#ffd700';c.beginPath();c.arc(sx,sy,20,0,Math.PI*2);c.fill();
     }
+    c.restore();
+    } // end if(state.alive) — alive player sprite rendering
     // Revive marker for dead teammates — highly visible
     if(!state.alive&&state.reviveMarker&&state.room===G.curRoom){
       const rx=state.reviveMarker.x+ox,ry=state.reviveMarker.y+oy;
