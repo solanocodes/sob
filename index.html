@@ -758,7 +758,7 @@ let gpIdx=0,gpNav=0;
 function pollGP(dt){gpNav=Math.max(0,gpNav-dt);const pads=navigator.getGamepads?navigator.getGamepads():[];const p=pads[0]||pads[1];if(!p){gpOn=false;return}gpOn=true;
 gpP.a=gp.a;gpP.b=gp.b;gpP.start=gp.start;
 const dz=gpDeadzone;gp.lx=Math.abs(p.axes[0])<dz?0:p.axes[0];gp.ly=Math.abs(p.axes[1])<dz?0:p.axes[1];
-gp.a=p.buttons[0]&&p.buttons[0].pressed;gp.b=p.buttons[1]&&p.buttons[1].pressed;gp.x=p.buttons[2]&&p.buttons[2].pressed;
+gp.a=p.buttons[0]&&p.buttons[0].pressed;gp.b=p.buttons[1]&&p.buttons[1].pressed;gp.x=p.buttons[2]&&p.buttons[2].pressed;gp.y=p.buttons[3]&&p.buttons[3].pressed;
 gp.start=(p.buttons[9]&&p.buttons[9].pressed)||(p.buttons[8]&&p.buttons[8].pressed);
 gp.dpU=p.buttons[12]&&p.buttons[12].pressed;gp.dpD=p.buttons[13]&&p.buttons[13].pressed;
 gp.dpL=p.buttons[14]&&p.buttons[14].pressed;
@@ -4223,23 +4223,45 @@ function update(dt){
       const rm=state.reviveMarker;
       const dist=Math.hypot(G.px-rm.x,G.py-rm.y);
       if(dist<50){
-        // Accumulate revive progress while standing near marker
-        rm._progress=(rm._progress||0)+dt;
-        const pct=Math.min(1,rm._progress/3); // 3 seconds to revive
-        G.floats.push({x:rm.x,y:rm.y-30,text:Math.floor(pct*100)+'%',col:'#44ff88',life:0.08,ml:0.08,sz:14});
-        if(pct>=1){
-          // Revive the teammate
-          try{NGame.sendRoomEvent(currentRoom.id,'revive_player',{target:pid})}catch(x){}
-          showBanner('⟐ TEAMMATE REVIVED ⟐','#44ff88');
-          snd('lvl');
-          delete state.reviveMarker;
-        }
+        // Show prompt to revive
+        G.floats.push({x:rm.x,y:rm.y-45,text:gpOn?'Ⓨ REVIVE':'[F] REVIVE',col:'#44ff88',life:0.08,ml:0.08,sz:12});
+        // Require F key or Y gamepad button to revive
+        const revivePressed=K['KeyF']||gp.y;
+        if(revivePressed){
+          rm._progress=(rm._progress||0)+dt;
+          const pct=Math.min(1,rm._progress/3); // 3 seconds to revive
+          G.floats.push({x:rm.x,y:rm.y-30,text:Math.floor(pct*100)+'%',col:'#44ff88',life:0.08,ml:0.08,sz:14});
+          if(pct>=1){
+            // Revive the teammate
+            try{NGame.sendRoomEvent(currentRoom.id,'revive_player',{target:pid})}catch(x){}
+            showBanner('⟐ TEAMMATE REVIVED ⟐','#44ff88');
+            snd('lvl');
+            delete state.reviveMarker;
+          }
+        }else{rm._progress=Math.max(0,(rm._progress||0)-dt*2)} // decay if not holding
       }else{rm._progress=0}
     });
   }
 
   // Multiplayer state sync
   try{if(currentRoom?.status==='in_game')sendMultiState()}catch(e){}
+
+  // HOST broadcasts enemy state so all clients share the same game
+  if(currentRoom?.status==='in_game'&&currentRoom.host_id===activeProfile?.id){
+    G._enemySyncTimer=(G._enemySyncTimer||0)+dt;
+    if(G._enemySyncTimer>=0.15){ // ~7 times/sec
+      G._enemySyncTimer=0;
+      const room=G.floor.rooms[G.curRoom];
+      if(room){
+        const eState=room.enemies.map(e=>({
+          x:Math.round(e.x),y:Math.round(e.y),
+          hp:Math.round(e.hp),dead:!!e.dead,
+          ai:e.ai,phase:e.phase||0
+        }));
+        try{NGame.sendRoomEvent(currentRoom.id,'enemy_sync',{ri:G.curRoom,enemies:eState})}catch(x){}
+      }
+    }
+  }
 }
 
 function finishTransition(){
@@ -5962,6 +5984,37 @@ try {
             // XP gem
             const xpMult=(1+(META.upgrades.xp||0)*0.1)*(activeMutators.famine?0.5:1)*(META.upgrades.shard_4?1.25:1);
             room.gems.push({x:e.x,y:e.y,val:Math.ceil(e.xp*xpMult),r:e.xp>5?6:4,col:e.xp>8?'#44ff88':'#44aaff',life:30});
+          }
+        }
+      }
+    }
+    // HOST enemy sync — clients apply authoritative enemy positions/HP
+    if(msg.event==='enemy_sync'&&G&&msg.profile_id!==activeProfile?.id){
+      const room=G.floor.rooms[msg.ri];
+      if(room&&msg.enemies){
+        for(let i=0;i<msg.enemies.length&&i<room.enemies.length;i++){
+          const src=msg.enemies[i];const tgt=room.enemies[i];
+          if(src.dead&&!tgt.dead){
+            tgt.dead=true;tgt.hp=0;snd('kill');
+            for(let j=0;j<3;j++){const a=Math.random()*Math.PI*2;G.fx.push({type:'p',x:tgt.x,y:tgt.y,vx:Math.cos(a)*60,vy:Math.sin(a)*60,life:0.2,ml:0.2,sz:3,col:tgt.col})}
+            const xpMult=(1+(META.upgrades.xp||0)*0.1)*(activeMutators.famine?0.5:1)*(META.upgrades.shard_4?1.25:1);
+            room.gems.push({x:tgt.x,y:tgt.y,val:Math.ceil(tgt.xp*xpMult),r:tgt.xp>5?6:4,col:tgt.xp>8?'#44ff88':'#44aaff',life:30});
+          }
+          if(!tgt.dead){
+            // Smoothly lerp to host position
+            tgt.x+=(src.x-tgt.x)*0.4;
+            tgt.y+=(src.y-tgt.y)*0.4;
+            tgt.hp=Math.min(tgt.hp,src.hp);
+            if(src.phase!==undefined)tgt.phase=src.phase;
+          }
+        }
+        // Handle extra enemies spawned by host (splitters, boss summons)
+        if(msg.enemies.length>room.enemies.length){
+          for(let i=room.enemies.length;i<msg.enemies.length;i++){
+            const src=msg.enemies[i];
+            if(!src.dead){
+              room.enemies.push({x:src.x,y:src.y,hp:src.hp,maxHp:src.hp,spd:60,dmg:5,xp:2,col:'#cc6644',r:10,ai:src.ai||'chase',dead:false,flash:0,aiTimer:0,phase:src.phase||0});
+            }
           }
         }
       }
