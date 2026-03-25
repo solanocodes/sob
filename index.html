@@ -1398,7 +1398,7 @@ function initSprites(){
   ]);
 
   // Marrow Leech — gravity worm
-  e2('marrowleech',10,10,{B:'#aaaa88',b:'#888866',S:'#9999770',E:'#8844ff',G:'#bbbb99',D:'#666640'},[
+  e2('marrowleech',10,10,{B:'#aaaa88',b:'#888866',S:'#999977',E:'#8844ff',G:'#bbbb99',D:'#666640'},[
     '  GGG     ','  BEEB    ',' BBBBB    ','  BSB     ','  SBS     ','  BSB     ','  SBS     ','  DSD     ','  D D     ',' D   D    '
   ],[
     '  GGG     ','  BEEB    ',' BBBBB    ','   BSB    ','   SBS    ','  BSB     ','  SBS     ','   DSD    ','   D D    ','  D   D   '
@@ -3038,7 +3038,7 @@ function hitE(e,dmg,_fromRemote){
   if(!_fromRemote&&currentRoom?.status==='in_game'){
     const room=G.floor.rooms[G.curRoom];
     const ei=room.enemies.indexOf(e);
-    if(ei>=0)try{NGame.sendRoomEvent(currentRoom.id,'enemy_hit',{ri:G.curRoom,ei,dmg,hp:e.hp})}catch(x){}
+    if(ei>=0)try{NGame.sendRoomEvent(currentRoom.id,'enemy_hit',{ri:G.curRoom,ei,dmg,hp:e.hp,ex:Math.round(e.x),ey:Math.round(e.y)})}catch(x){}
   }
   // Track damage dealt
   if(G&&G.runStats)G.runStats.dmgDealt+=dmg;
@@ -3859,7 +3859,7 @@ function update(dt){
       const hpPct=e.hp/e.maxHp;
       // Determine phase
       let ph=0;
-      for(let i=def.phases.length-1;i>=0;i--){if(hpPct<=def.phases[i].at){ph=i}}
+      for(let i=def.phases.length-1;i>=0;i--){if(hpPct<=def.phases[i].at){ph=i;break}}
       if(ph!==e.phase){
         e.phase=ph;G.shake=0.5;snd('fire');snd('clear');
         const isFinal=e.bossId===5;
@@ -5319,7 +5319,8 @@ function render(){
     }
     // Exploder — red glow intensifies as closer
     if(e.ai==='exploder'){
-      const closeness=Math.max(0,1-d/150);
+      const dx2=ex-(G.px-camX+cnv.width/2),dy2=ey-(G.py-camY+cnv.height/2);const eDist=Math.sqrt(dx2*dx2+dy2*dy2);
+      const closeness=Math.max(0,1-eDist/150);
       c.globalAlpha=closeness*0.3;c.fillStyle='#ff4400';
       c.beginPath();c.arc(ex,ey,e.r+10,0,Math.PI*2);c.fill();c.globalAlpha=1;
     }
@@ -5660,25 +5661,6 @@ if(w.cursed)el.style.cssText='border-color:#8844aa;box-shadow:0 0 6px rgba(136,6
 el.innerHTML=`${d.icon}<span class="wep-lvl">${w.lvl}</span>${w.cursed?'<span style="position:absolute;top:-2px;right:-2px;font-size:8px">💀</span>':''}`;
 el.style.position='relative';bar.appendChild(el)})}
 
-function victory(){
-  // Save to leaderboard before ending
-  saveToLeaderboard();
-  G.alive=false;stopMusic();try{ngSubmitVictory()}catch(e){}
-  try{if(currentRoom)leaveRoom()}catch(e){}
-META.upgrades.beaten=1;saveMeta();checkAchievement('beat_game');checkAchievement('all_shards');
-if(nightmareRun){
-  META.upgrades.shard_nightmare=1;checkAchievement('nightmare_win');
-  if(!META.upgrades.nightmareTime||G.runTime<META.upgrades.nightmareTime)META.upgrades.nightmareTime=Math.floor(G.runTime);
-  saveMeta();nightmareRun=false;
-  // Reset mutators
-  MUTATORS.forEach(m=>activeMutators[m.id]=false);
-}
-const gold=addRunGold();
-document.getElementById('endT').textContent=META.upgrades.shard_nightmare&&G.runTime<10000?'THE NIGHTMARE IS CONQUERED':'VICTORY';
-document.getElementById('endT').style.background=META.upgrades.shard_nightmare?'linear-gradient(180deg,#ff4444,#880000)':'linear-gradient(180deg,#ffd700,#cc8800)';
-document.getElementById('endT').style['-webkit-background-clip']='text';document.getElementById('endT').style['-webkit-text-fill-color']='transparent';
-document.getElementById('endSub').textContent=META.upgrades.shard_nightmare?'You have conquered the darkness. The Pyreheart is whole.':'The Pyreheart is restored.';
-document.getElementById('endStats').innerHTML=`${G.charAvatar} ${G.charName}<br>${G.loop>0?'LOOP: '+(G.loop+1)+'<br>':''}FLOORS: ${G.floorNum+1}<br>TIME: ${Math.floor(G.runTime/60)}:${String(Math.floor(G.runTime%60)).padStart(2,'0')}<br>LEVEL: ${G.lvl}<br>KILLS: ${G.kills}<br><span style="color:#ffd700">+${gold} GOLD EARNED</span>`;
 // ═══════════════════════════════════════
 // LEADERBOARD
 // ═══════════════════════════════════════
@@ -5730,6 +5712,25 @@ function buildLeaderboardUI(){
   el.innerHTML=html;
 }
 
+function victory(){
+  // Save to leaderboard before ending
+  saveToLeaderboard();
+  G.alive=false;stopMusic();try{ngSubmitVictory()}catch(e){}
+  try{if(currentRoom)leaveRoom()}catch(e){}
+META.upgrades.beaten=1;saveMeta();checkAchievement('beat_game');checkAchievement('all_shards');
+if(nightmareRun){
+  META.upgrades.shard_nightmare=1;checkAchievement('nightmare_win');
+  if(!META.upgrades.nightmareTime||G.runTime<META.upgrades.nightmareTime)META.upgrades.nightmareTime=Math.floor(G.runTime);
+  saveMeta();nightmareRun=false;
+  // Reset mutators
+  MUTATORS.forEach(m=>activeMutators[m.id]=false);
+}
+const gold=addRunGold();
+document.getElementById('endT').textContent=META.upgrades.shard_nightmare&&G.runTime<10000?'THE NIGHTMARE IS CONQUERED':'VICTORY';
+document.getElementById('endT').style.background=META.upgrades.shard_nightmare?'linear-gradient(180deg,#ff4444,#880000)':'linear-gradient(180deg,#ffd700,#cc8800)';
+document.getElementById('endT').style['-webkit-background-clip']='text';document.getElementById('endT').style['-webkit-text-fill-color']='transparent';
+document.getElementById('endSub').textContent=META.upgrades.shard_nightmare?'You have conquered the darkness. The Pyreheart is whole.':'The Pyreheart is restored.';
+document.getElementById('endStats').innerHTML=`${G.charAvatar} ${G.charName}<br>${G.loop>0?'LOOP: '+(G.loop+1)+'<br>':''}FLOORS: ${G.floorNum+1}<br>TIME: ${Math.floor(G.runTime/60)}:${String(Math.floor(G.runTime%60)).padStart(2,'0')}<br>LEVEL: ${G.lvl}<br>KILLS: ${G.kills}<br><span style="color:#ffd700">+${gold} GOLD EARNED</span>`;
 setTimeout(()=>showS('endScreen'),500)}
 
 function endGame(){
@@ -5946,8 +5947,13 @@ try {
     // Enemy hit from another player — apply damage locally
     if(msg.event==='enemy_hit'&&G&&msg.profile_id!==activeProfile?.id){
       const room=G.floor.rooms[msg.ri];
-      if(room&&room.enemies[msg.ei]){
-        const e=room.enemies[msg.ei];
+      if(room){
+        // Find enemy by index first, fall back to position match
+        let e=room.enemies[msg.ei];
+        if(!e||e.dead||(msg.ex!==undefined&&Math.abs(e.x-msg.ex)>60)){
+          e=room.enemies.find(en=>!en.dead&&msg.ex!==undefined&&Math.abs(en.x-msg.ex)<60&&Math.abs(en.y-msg.ey)<60);
+        }
+        if(!e)return;
         if(!e.dead){
           e.hp=Math.min(e.hp,msg.hp);e.flash=0.1;
           if(e.hp<=0&&!e.dead){e.dead=true;snd('kill');
